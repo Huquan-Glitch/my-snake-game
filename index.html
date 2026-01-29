@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#222222">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>极简贪吃蛇</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            overflow: hidden; /* 禁止页面滚动 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            touch-action: none; /* 关键：禁止浏览器处理触摸动作（如滚动），交给JS处理 */
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            background-color: #1a1a1a;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 让点击穿透到Canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        #score-board {
+            color: #fff;
+            padding: 40px 20px 0; /* 避开刘海屏 */
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            pointer-events: auto; /* 允许点击开始 */
+            z-index: 10;
+        }
+       .btn {
+            padding: 15px 40px;
+            background: #4CAF50;
+            border: none;
+            border-radius: 50px;
+            color: white;
+            font-size: 24px;
+            margin-top: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+       .btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div id="score-board">分数: <span id="score">0</span></div>
+    </div>
+
+    <div id="start-screen">
+        <h1>SNAKE</h1>
+        <p>滑动屏幕控制方向</p>
+        <button class="btn" onclick="startGame()">开始游戏</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+        const startScreen = document.getElementById('start-screen');
+
+        // 游戏配置
+        let gridSize = 20; // 网格大小
+        let tileCountX = 20;
+        let tileCountY = 20;
+        
+        // 游戏状态
+        let score = 0;
+        let snake =;
+        let food = {x: 15, y: 15};
+        let velocity = {x: 0, y: 0};
+        let nextVelocity = {x: 0, y: 0}; // 缓冲输入，防止快速操作导致的自杀
+        let gameInterval;
+        let gameSpeed = 100; // 毫秒/帧
+        let isGameRunning = false;
+
+        // 音效上下文
+        let audioCtx;
+
+        // 初始化Canvas尺寸
+        function resize() {
+            // 获取屏幕宽高，并确保是 gridSize 的倍数
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            
+            // 计算能容纳的最大网格数
+            tileCountX = Math.floor(w / gridSize);
+            tileCountY = Math.floor(h / gridSize);
+
+            // 设置Canvas大小
+            canvas.width = tileCountX * gridSize;
+            canvas.height = tileCountY * gridSize;
+        }
+        
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 核心游戏循环
+        function gameLoop() {
+            update();
+            draw();
+        }
+
+        function update() {
+            // 应用缓冲的转向
+            velocity = {...nextVelocity};
+
+            // 移动蛇头
+            const head = {x: snake.x + velocity.x, y: snake.y + velocity.y};
+
+            // 穿墙逻辑 (环绕模式)
+            if (head.x < 0) head.x = tileCountX - 1;
+            if (head.x >= tileCountX) head.x = 0;
+            if (head.y < 0) head.y = tileCountY - 1;
+            if (head.y >= tileCountY) head.y = 0;
+
+            // 撞击自身检测
+            for (let i = 0; i < snake.length; i++) {
+                if (head.x === snake[i].x && head.y === snake[i].y) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            snake.unshift(head); // 添加新蛇头
+
+            // 吃食物检测
+            if (head.x === food.x && head.y === food.y) {
+                score++;
+                scoreElement.innerText = score;
+                playSound(600, 0.1, 'sine'); // 播放吃东西音效
+                placeFood();
+                // 稍微加快速度 (可选)
+                // if(gameSpeed > 50) gameSpeed -= 1; 
+            } else {
+                snake.pop(); // 移除蛇尾
+            }
+        }
+
+        function draw() {
+            // 清空画布
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 画食物
+            ctx.fillStyle = '#FF4081'; // 粉红色食物
+            ctx.beginPath();
+            const foodPx = food.x * gridSize;
+            const foodPy = food.y * gridSize;
+            // 画圆
+            ctx.arc(foodPx + gridSize/2, foodPy + gridSize/2, gridSize/2 - 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 画蛇
+            ctx.fillStyle = '#4CAF50'; // 绿色蛇
+            snake.forEach((part, index) => {
+                // 蛇头颜色稍微不同
+                if(index === 0) ctx.fillStyle = '#69F0AE';
+                else ctx.fillStyle = '#4CAF50';
+                
+                ctx.fillRect(part.x * gridSize + 1, part.y * gridSize + 1, gridSize - 2, gridSize - 2);
+            });
+        }
+
+        function placeFood() {
+            // 简单的随机生成，暂不考虑生成在蛇身上的情况以保持性能
+            food.x = Math.floor(Math.random() * tileCountX);
+            food.y = Math.floor(Math.random() * tileCountY);
+        }
+
+        function startGame() {
+            // 初始化音频 (必须在用户交互中触发)
+            if (!audioCtx) audioCtx = new (window.AudioContext |
+
+| window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            snake = [{x: 10, y: 10}, {x: 10, y: 11}, {x: 10, y: 12}];
+            velocity = {x: 0, y: -1}; // 默认向上
+            nextVelocity = {x: 0, y: -1};
+            score = 0;
+            scoreElement.innerText = score;
+            placeFood();
+            startScreen.style.display = 'none';
+            isGameRunning = true;
+            
+            if (gameInterval) clearInterval(gameInterval);
+            gameInterval = setInterval(gameLoop, gameSpeed);
+        }
+
+        function gameOver() {
+            isGameRunning = false;
+            clearInterval(gameInterval);
+            playSound(150, 0.5, 'sawtooth'); // 播放死亡音效
+            alert(`游戏结束! 得分: ${score}`);
+            startScreen.style.display = 'flex';
+        }
+
+        // --- 输入控制 (触摸滑动) ---
+        let touchStartX = 0;
+        let touchStartY = 0;
+
+        document.addEventListener('touchstart', function(e) {
+            touchStartX = e.changedTouches.screenX;
+            touchStartY = e.changedTouches.screenY;
+        }, {passive: false});
+
+        document.addEventListener('touchend', function(e) {
+            if(!isGameRunning) return;
+
+            let touchEndX = e.changedTouches.screenX;
+            let touchEndY = e.changedTouches.screenY;
+            
+            handleSwipe(touchStartX, touchStartY, touchEndX, touchEndY);
+        }, {passive: false});
+
+        function handleSwipe(sx, sy, ex, ey) {
+            let dx = ex - sx;
+            let dy = ey - sy;
+            
+            // 最小滑动距离阈值，防止误触
+            if (Math.abs(dx) < 30 && Math.abs(dy) < 30) return;
+
+            // 判断主要滑动方向
+            if (Math.abs(dx) > Math.abs(dy)) {
+                // 水平滑动
+                if (dx > 0 && velocity.x === 0) nextVelocity = {x: 1, y: 0}; // 右
+                if (dx < 0 && velocity.x === 0) nextVelocity = {x: -1, y: 0}; // 左
+            } else {
+                // 垂直滑动
+                if (dy > 0 && velocity.y === 0) nextVelocity = {x: 0, y: 1}; // 下
+                if (dy < 0 && velocity.y === 0) nextVelocity = {x: 0, y: -1}; // 上
+            }
+        }
+
+        // --- 键盘控制 (PC调试用) ---
+        document.addEventListener('keydown', e => {
+            if(!isGameRunning) return;
+            switch(e.key) {
+                case 'ArrowUp': if(velocity.y === 0) nextVelocity = {x: 0, y: -1}; break;
+                case 'ArrowDown': if(velocity.y === 0) nextVelocity = {x: 0, y: 1}; break;
+                case 'ArrowLeft': if(velocity.x === 0) nextVelocity = {x: -1, y: 0}; break;
+                case 'ArrowRight': if(velocity.x === 0) nextVelocity = {x: 1, y: 0}; break;
+            }
+        });
+
+        // --- 简单音效合成器 ---
+        function playSound(freq, duration, type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        // 注册 Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                   .then(reg => console.log('SW registered'))
+                   .catch(err => console.log('SW failed', err));
+            });
+        }
+    </script>
+</body>
+</html>
