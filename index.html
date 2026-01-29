@@ -3,340 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>贪吃蛇移动版</title>
-    <!-- 引入 Tailwind CSS 用于快速布局 -->
+    <title>愤怒的小鸟：终极优化版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 禁止整个页面在手机上被拖动/橡皮筋效果 */
-        body {
-            overscroll-behavior: none;
-            touch-action: none;
-            user-select: none;
-            -webkit-user-select: none;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
+        body { margin: 0; padding: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .hud-text { font-weight: 900; text-shadow: 2px 2px 0 rgba(0,0,0,0.3); }
         
-        /* 游戏画布样式 */
-        #gameCanvas {
-            background-color: #000;
-            image-rendering: pixelated; /* 保持像素清晰 */
-            border-radius: 8px;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        /* 胜利动画 */
+        #level-card {
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: scale(0);
         }
-
-        /* 按钮按下时的动画效果 */
-        .btn-press:active, .btn-press.active {
-            transform: scale(0.95);
-            background-color: #166534; /* green-800 */
-            border-bottom-width: 0px;
-            margin-top: 4px;
-        }
-
-        /* 隐藏元素 */
-        .hidden {
-            display: none !important;
-        }
+        #level-card.active { transform: scale(1); }
     </style>
 </head>
-<body class="bg-gray-900 text-white h-screen flex flex-col items-center justify-center p-2 overflow-hidden">
+<body>
 
-    <!-- 顶部计分板 -->
-    <div class="w-full max-w-[400px] flex justify-between items-center mb-4 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
-        <div>
-            <h1 class="text-xl font-bold text-green-400">贪吃蛇</h1>
-            <div class="text-xs text-gray-400 mt-1">
-                最高分: <span id="highScoreVal">0</span>
+    <!-- 游戏画布 -->
+    <div id="game-container" class="relative w-full h-full"></div>
+
+    <!-- UI 层 -->
+    <div id="ui-layer" class="flex flex-col justify-between p-6">
+        <div class="flex justify-between items-start">
+            <div class="text-white">
+                <div class="text-2xl hud-text">LEVEL <span id="level-display">1</span></div>
+                <div class="text-lg opacity-80">Score: <span id="score-display">0</span></div>
+            </div>
+            <button onclick="Game.resetLevel()" class="pointer-events-auto bg-white/20 hover:bg-white/40 backdrop-blur-md text-white p-3 rounded-full transition">
+                🔄
+            </button>
+        </div>
+
+        <!-- 关卡结算卡片 -->
+        <div id="level-card" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div class="bg-white rounded-2xl p-8 shadow-2xl text-center pointer-events-auto transform transition-all border-4 border-yellow-400">
+                <div class="text-6xl mb-2">⭐</div>
+                <h2 class="text-3xl font-black text-gray-800 mb-2">VICTORY!</h2>
+                <p class="text-gray-500 mb-6">猪猪已被消灭</p>
+                <button onclick="Game.nextLevel()" class="bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 px-8 rounded-full text-lg shadow-lg transform active:scale-95 transition">
+                    下一关 ▶
+                </button>
             </div>
         </div>
-        <div class="text-3xl font-mono font-bold text-white" id="scoreVal">0</div>
     </div>
-
-    <!-- 游戏区域容器 -->
-    <div class="relative group">
-        <!-- Canvas 画布 -->
-        <canvas id="gameCanvas" width="400" height="400" class="border-4 border-gray-700 block max-w-[90vw] max-h-[50vh]"></canvas>
-
-        <!-- 开始菜单覆盖层 -->
-        <div id="startScreen" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 rounded-lg backdrop-blur-sm">
-            <h2 class="text-4xl font-bold mb-6 text-green-500 tracking-wider" style="text-shadow: 0 0 10px rgba(34, 197, 94, 0.5);">SNAKE</h2>
-            <button id="startBtn" class="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-full transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] transform hover:scale-105 active:scale-95">
-                <!-- Play Icon -->
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 5V19L19 12L8 5Z"/></svg>
-                开始游戏
-            </button>
-            <p class="mt-4 text-gray-500 text-sm">点击按钮开始</p>
-        </div>
-
-        <!-- 游戏结束覆盖层 -->
-        <div id="gameOverScreen" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 rounded-lg backdrop-blur-sm hidden">
-            <h2 class="text-3xl font-bold mb-2 text-red-500">GAME OVER</h2>
-            <p class="text-gray-300 mb-6 text-lg">最终得分: <span id="finalScore">0</span></p>
-            <button id="restartBtn" class="flex items-center gap-2 px-8 py-3 bg-white text-black hover:bg-gray-200 font-bold rounded-full transition-all transform hover:scale-105 active:scale-95">
-                <!-- Restart Icon -->
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
-                再玩一次
-            </button>
-        </div>
-    </div>
-
-    <!-- 虚拟控制器 (手机端专用) -->
-    <div class="mt-6 grid grid-cols-3 gap-3 w-[200px] h-[200px] select-none touch-manipulation">
-        <!-- 上 -->
-        <div class="col-start-2">
-            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="up">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-            </button>
-        </div>
-        <!-- 左 -->
-        <div class="col-start-1 row-start-2">
-            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="left">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-            </button>
-        </div>
-        <!-- 中心装饰 -->
-        <div class="col-start-2 row-start-2 flex items-center justify-center">
-            <div class="w-4 h-4 bg-gray-700 rounded-full opacity-50"></div>
-        </div>
-        <!-- 右 -->
-        <div class="col-start-3 row-start-2">
-            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="right">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-            </button>
-        </div>
-        <!-- 下 -->
-        <div class="col-start-2 row-start-3">
-            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="down">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
-        </div>
-    </div>
-    
-    <p class="mt-4 text-[10px] text-gray-600">PC端请使用键盘方向键 • 移动端请点击下方按钮</p>
 
     <script>
-        // --- 游戏配置 ---
-        const CANVAS_SIZE = 400;
-        const GRID_COUNT = 20;
-        const CELL_SIZE = CANVAS_SIZE / GRID_COUNT;
-        
-        // --- DOM 元素 ---
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const scoreEl = document.getElementById('scoreVal');
-        const highScoreEl = document.getElementById('highScoreVal');
-        const finalScoreEl = document.getElementById('finalScore');
-        const startScreen = document.getElementById('startScreen');
-        const gameOverScreen = document.getElementById('gameOverScreen');
-        const startBtn = document.getElementById('startBtn');
-        const restartBtn = document.getElementById('restartBtn');
-        const dPadButtons = document.querySelectorAll('.d-pad');
+        // --- 游戏引擎封装 ---
+        const Game = (() => {
+            // Matter.js 模块
+            const { Engine, Render, Runner, World, Bodies, Body, Composite, Events, Constraint, Mouse, MouseConstraint, Vector, Detector } = Matter;
 
-        // --- 游戏状态变量 ---
-        let gameLoopId = null;
-        let snake = [];
-        let food = {};
-        let direction = {};
-        let nextDirection = {}; // 缓冲输入，防止一帧内连续掉头
-        let score = 0;
-        let speed = 150;
-        let isGameRunning = false;
-        
-        // 读取最高分
-        let highScore = parseInt(localStorage.getItem('snakeHighScore') || '0');
-        highScoreEl.textContent = highScore;
+            let engine, render, runner, mouseConstraint;
+            let bird, sling, anchor;
+            let entities = { pigs: [], blocks: [], particles: [] };
+            let currentLevel = 0;
+            let score = 0;
+            let isFired = false;
 
-        // --- 初始化函数 ---
-        function initGame() {
-            snake = [
-                {x: 10, y: 10},
-                {x: 10, y: 11},
-                {x: 10, y: 12}
+            // 关卡设计数据
+            const levels = [
+                // Level 1: 简单塔
+                {
+                    setup: (w, h) => {
+                        createStructure(w - 300, h - 20, [
+                            ['wood', 20, 100, 0, 0], ['wood', 20, 100, 100, 0],
+                            ['wood', 140, 20, 50, -60],
+                            ['pig', 0, 0, 50, 0]
+                        ]);
+                    }
+                },
+                // Level 2: 石头堡垒
+                {
+                    setup: (w, h) => {
+                        createStructure(w - 400, h - 20, [
+                            ['stone', 30, 120, 0, 0], ['stone', 30, 120, 120, 0],
+                            ['wood', 180, 20, 60, -70],
+                            ['pig', 0, 0, 60, 0],
+                            ['wood', 20, 80, 60, -120],
+                            ['pig', 0, 0, 60, -170]
+                        ]);
+                    }
+                },
+                // Level 3: 金字塔
+                {
+                    setup: (w, h) => {
+                        const startX = w - 500;
+                        const startY = h - 20;
+                        for(let i=0; i<3; i++) {
+                            createBlock(startX + i*80, startY-30, 20, 60, 'wood');
+                            createPig(startX + i*80 + 40, startY-15);
+                            createBlock(startX + i*80 + 80, startY-30, 20, 60, 'wood');
+                            createBlock(startX + i*80 + 40, startY-70, 100, 20, 'stone');
+                        }
+                        createPig(startX + 120, startY - 100);
+                    }
+                }
             ];
-            direction = {x: 0, y: -1}; // 向上
-            nextDirection = {x: 0, y: -1};
-            score = 0;
-            speed = 150;
-            scoreEl.textContent = score;
-            placeFood();
-            isGameRunning = true;
-            
-            // UI 切换
-            startScreen.classList.add('hidden');
-            gameOverScreen.classList.add('hidden');
-            
-            // 启动循环
-            if (gameLoopId) clearInterval(gameLoopId);
-            gameLoopId = setInterval(gameLoop, speed);
-        }
 
-        // --- 生成食物 ---
-        function placeFood() {
-            let valid = false;
-            while (!valid) {
-                food = {
-                    x: Math.floor(Math.random() * GRID_COUNT),
-                    y: Math.floor(Math.random() * GRID_COUNT)
-                };
-                // 检查是否生成在蛇身上
-                valid = !snake.some(segment => segment.x === food.x && segment.y === food.y);
-            }
-        }
-
-        // --- 游戏主循环 ---
-        function gameLoop() {
-            update();
-            draw();
-        }
-
-        // --- 逻辑更新 ---
-        function update() {
-            // 更新方向
-            direction = nextDirection;
-
-            const head = {x: snake[0].x + direction.x, y: snake[0].y + direction.y};
-
-            // 1. 撞墙检测
-            if (head.x < 0 || head.x >= GRID_COUNT || head.y < 0 || head.y >= GRID_COUNT) {
-                gameOver();
-                return;
-            }
-
-            // 2. 撞自己检测
-            if (snake.some(segment => segment.x === head.x && segment.y === head.y)) {
-                gameOver();
-                return;
-            }
-
-            // 移动蛇头
-            snake.unshift(head);
-
-            // 3. 吃食物
-            if (head.x === food.x && head.y === food.y) {
-                score += 10;
-                scoreEl.textContent = score;
-                placeFood();
-                
-                // 加速
-                if (speed > 60) {
-                    speed -= 2;
-                    clearInterval(gameLoopId);
-                    gameLoopId = setInterval(gameLoop, speed);
-                }
-            } else {
-                // 没吃到，移除蛇尾
-                snake.pop();
-            }
-        }
-
-        // --- 渲染绘图 ---
-        function draw() {
-            // 清空画布
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-            // 画食物
-            ctx.fillStyle = '#ef4444'; // Red-500
-            ctx.beginPath();
-            ctx.arc(
-                food.x * CELL_SIZE + CELL_SIZE / 2, 
-                food.y * CELL_SIZE + CELL_SIZE / 2, 
-                CELL_SIZE / 2 - 2, 
-                0, 
-                Math.PI * 2
-            );
-            ctx.fill();
-            // 食物发光效果
-            ctx.shadowColor = '#ef4444';
-            ctx.shadowBlur = 10;
-            ctx.fill();
-            ctx.shadowBlur = 0; // 重置阴影
-
-            // 画蛇
-            snake.forEach((segment, index) => {
-                // 蛇头颜色不同
-                if (index === 0) {
-                    ctx.fillStyle = '#4ade80'; // Green-400
-                } else {
-                    ctx.fillStyle = '#16a34a'; // Green-600
-                }
-                
-                // 稍微留一点缝隙，让蛇有一节节的感觉
-                const pad = 1; 
-                ctx.fillRect(
-                    segment.x * CELL_SIZE + pad, 
-                    segment.y * CELL_SIZE + pad, 
-                    CELL_SIZE - pad * 2, 
-                    CELL_SIZE - pad * 2
-                );
-            });
-        }
-
-        // --- 游戏结束 ---
-        function gameOver() {
-            isGameRunning = false;
-            clearInterval(gameLoopId);
-            
-            // 更新最高分
-            if (score > highScore) {
-                highScore = score;
-                localStorage.setItem('snakeHighScore', highScore);
-                highScoreEl.textContent = highScore;
-            }
-            
-            finalScoreEl.textContent = score;
-            gameOverScreen.classList.remove('hidden');
-        }
-
-        // --- 输入处理 ---
-        function handleInput(newDir) {
-            if (!isGameRunning) return;
-            
-            // 防止掉头 (比如正在向右走，不能直接按左)
-            // 这里对比的是 direction (当前正在移动的方向) 而不是 nextDirection
-            if (direction.x + newDir.x === 0 && direction.y + newDir.y === 0) {
-                return;
-            }
-            nextDirection = newDir;
-        }
-
-        // 键盘监听
-        document.addEventListener('keydown', (e) => {
-            switch(e.key) {
-                case 'ArrowUp': handleInput({x: 0, y: -1}); break;
-                case 'ArrowDown': handleInput({x: 0, y: 1}); break;
-                case 'ArrowLeft': handleInput({x: -1, y: 0}); break;
-                case 'ArrowRight': handleInput({x: 1, y: 0}); break;
-            }
-        });
-
-        // 按钮点击监听 (兼容 触摸 和 鼠标)
-        dPadButtons.forEach(btn => {
-            // 使用 pointerdown 替代 click 以获得更快的响应，并防止双击缩放
-            btn.addEventListener('pointerdown', (e) => {
-                e.preventDefault(); // 阻止默认行为（如选中文字）
-                
-                // 添加按压效果类
-                btn.classList.add('active');
-                
-                const dir = btn.dataset.dir;
-                if (dir === 'up') handleInput({x: 0, y: -1});
-                if (dir === 'down') handleInput({x: 0, y: 1});
-                if (dir === 'left') handleInput({x: -1, y: 0});
-                if (dir === 'right') handleInput({x: 1, y: 0});
-            });
-
-            // 松开时移除按压效果
-            btn.addEventListener('pointerup', () => btn.classList.remove('active'));
-            btn.addEventListener('pointerleave', () => btn.classList.remove('active'));
-        });
-
-        // 按钮绑定
-        startBtn.addEventListener('click', initGame);
-        restartBtn.addEventListener('click', initGame);
-        // 手机上 touchstart 响应更快
-        startBtn.addEventListener('touchstart', (e) => { e.preventDefault(); initGame(); });
-        restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); initGame(); });
-
-    </script>
-</body>
-</html>
+            function init() {
+                // 1. 基础设置
+                engine = Engine.create();
+                const container = document.getElementById('game-container');
+                render = Render.create({
+                    element: container,
+                    engine: engine,
+                    options: {
+                        width: window.innerWidth,
+                        height
