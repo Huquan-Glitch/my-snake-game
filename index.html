@@ -1,287 +1,342 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, RotateCcw, Trophy, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
-
-// 游戏配置常量
-const GRID_SIZE = 20; // 网格大小
-const INITIAL_SPEED = 150; // 初始速度 (毫秒)
-const SPEED_INCREMENT = 2; // 每吃一个食物减少的毫秒数
-const MIN_SPEED = 60; // 最快速度限制
-
-// 辅助函数：生成随机食物位置，不能在蛇身上
-const generateFood = (snakeBody) => {
-  let newFood;
-  while (true) {
-    newFood = {
-      x: Math.floor(Math.random() * GRID_SIZE),
-      y: Math.floor(Math.random() * GRID_SIZE),
-    };
-    const isOnSnake = snakeBody.some(segment => segment.x === newFood.x && segment.y === newFood.y);
-    if (!isOnSnake) break;
-  }
-  return newFood;
-};
-
-export default function App() {
-  // 游戏状态: 'MENU', 'PLAYING', 'GAME_OVER'
-  const [gameState, setGameState] = useState('MENU');
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
-  
-  // 蛇的状态
-  const [snake, setSnake] = useState([{ x: 10, y: 10 }]);
-  const [food, setFood] = useState({ x: 5, y: 5 });
-  const [direction, setDirection] = useState({ x: 0, y: -1 }); // 初始向上
-  
-  // 使用 ref 来存储当前实际移动方向，防止在一次 tick 内快速连续按键导致掉头自杀
-  const currentDirectionRef = useRef({ x: 0, y: -1 });
-  const speedRef = useRef(INITIAL_SPEED);
-  const gameLoopRef = useRef(null);
-
-  // 初始化/读取最高分
-  useEffect(() => {
-    const saved = localStorage.getItem('snakeHighScore');
-    if (saved) setHighScore(parseInt(saved, 10));
-  }, []);
-
-  // 游戏主循环
-  const gameTick = useCallback(() => {
-    setSnake(prevSnake => {
-      const head = prevSnake[0];
-      const newHead = {
-        x: head.x + currentDirectionRef.current.x,
-        y: head.y + currentDirectionRef.current.y
-      };
-
-      // 1. 碰撞检测：撞墙
-      if (
-        newHead.x < 0 || 
-        newHead.x >= GRID_SIZE || 
-        newHead.y < 0 || 
-        newHead.y >= GRID_SIZE
-      ) {
-        setGameState('GAME_OVER');
-        return prevSnake;
-      }
-
-      // 2. 碰撞检测：撞自己
-      if (prevSnake.some(segment => segment.x === newHead.x && segment.y === newHead.y)) {
-        setGameState('GAME_OVER');
-        return prevSnake;
-      }
-
-      const newSnake = [newHead, ...prevSnake];
-
-      // 3. 吃食物检测
-      if (newHead.x === food.x && newHead.y === food.y) {
-        setScore(s => {
-          const newScore = s + 10;
-          // 增加速度
-          speedRef.current = Math.max(MIN_SPEED, speedRef.current - SPEED_INCREMENT);
-          return newScore;
-        });
-        setFood(generateFood(newSnake));
-        // 这里不移除尾部，相当于变长
-      } else {
-        // 没吃到食物，移除尾部，保持长度不变（但因为加了头，实际上是移动）
-        newSnake.pop();
-      }
-
-      return newSnake;
-    });
-  }, [food]);
-
-  // 控制游戏循环的启动和停止
-  useEffect(() => {
-    if (gameState === 'PLAYING') {
-      gameLoopRef.current = setInterval(gameTick, speedRef.current);
-    } else {
-      if (gameLoopRef.current) clearInterval(gameLoopRef.current);
-      // 游戏结束更新最高分
-      if (gameState === 'GAME_OVER') {
-        if (score > highScore) {
-          setHighScore(score);
-          localStorage.setItem('snakeHighScore', score.toString());
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>贪吃蛇移动版</title>
+    <!-- 引入 Tailwind CSS 用于快速布局 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 禁止整个页面在手机上被拖动/橡皮筋效果 */
+        body {
+            overscroll-behavior: none;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         }
-      }
-    }
-    return () => {
-      if (gameLoopRef.current) clearInterval(gameLoopRef.current);
-    };
-  }, [gameState, gameTick, score, highScore]);
+        
+        /* 游戏画布样式 */
+        #gameCanvas {
+            background-color: #000;
+            image-rendering: pixelated; /* 保持像素清晰 */
+            border-radius: 8px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+        }
 
-  // 这里的 useEffect 专门用于在速度变化时重置定时器，保证加速平滑
-  useEffect(() => {
-    if (gameState === 'PLAYING') {
-      if (gameLoopRef.current) clearInterval(gameLoopRef.current);
-      gameLoopRef.current = setInterval(gameTick, speedRef.current);
-    }
-  }, [score]); // score 变了说明可能加速了
+        /* 按钮按下时的动画效果 */
+        .btn-press:active, .btn-press.active {
+            transform: scale(0.95);
+            background-color: #166534; /* green-800 */
+            border-bottom-width: 0px;
+            margin-top: 4px;
+        }
 
-  // 处理方向改变 (兼容键盘)
-  const handleDirectionChange = useCallback((newDir) => {
-    // 禁止直接掉头 (比如当前向左，不能按右)
-    // 利用 currentDirectionRef 确保判断的是上一帧的真实方向
-    const current = currentDirectionRef.current;
-    if (newDir.x + current.x === 0 && newDir.y + current.y === 0) return;
-    
-    // 更新 Ref 供下一次 tick 使用
-    currentDirectionRef.current = newDir;
-    // 更新 State 仅用于 UI (如果有需要)
-    setDirection(newDir);
-  }, []);
+        /* 隐藏元素 */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white h-screen flex flex-col items-center justify-center p-2 overflow-hidden">
 
-  // 键盘监听
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (gameState !== 'PLAYING') return;
-      
-      switch (e.key) {
-        case 'ArrowUp': handleDirectionChange({ x: 0, y: -1 }); break;
-        case 'ArrowDown': handleDirectionChange({ x: 0, y: 1 }); break;
-        case 'ArrowLeft': handleDirectionChange({ x: -1, y: 0 }); break;
-        case 'ArrowRight': handleDirectionChange({ x: 1, y: 0 }); break;
-        default: break;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState, handleDirectionChange]);
-
-  // 开始游戏逻辑
-  const startGame = () => {
-    setSnake([{ x: 10, y: 10 }, { x: 10, y: 11 }, { x: 10, y: 12 }]); // 初始长度为3
-    setFood(generateFood([{ x: 10, y: 10 }, { x: 10, y: 11 }, { x: 10, y: 12 }]));
-    setScore(0);
-    setDirection({ x: 0, y: -1 });
-    currentDirectionRef.current = { x: 0, y: -1 };
-    speedRef.current = INITIAL_SPEED;
-    setGameState('PLAYING');
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4 font-sans touch-none">
-      
-      {/* 标题栏 */}
-      <div className="w-full max-w-md flex justify-between items-center mb-4 bg-gray-800 p-4 rounded-xl shadow-lg">
+    <!-- 顶部计分板 -->
+    <div class="w-full max-w-[400px] flex justify-between items-center mb-4 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700">
         <div>
-          <h1 className="text-xl font-bold text-green-400">贪吃蛇</h1>
-          <div className="text-xs text-gray-400 flex items-center gap-1">
-            <Trophy size={12} /> 最高分: {highScore}
-          </div>
+            <h1 class="text-xl font-bold text-green-400">贪吃蛇</h1>
+            <div class="text-xs text-gray-400 mt-1">
+                最高分: <span id="highScoreVal">0</span>
+            </div>
         </div>
-        <div className="text-2xl font-mono font-bold text-white">
-          {score}
-        </div>
-      </div>
-
-      {/* 游戏画布区域 */}
-      <div className="relative bg-black border-4 border-gray-700 rounded-lg shadow-2xl overflow-hidden">
-        {/* 游戏网格 */}
-        <div 
-          style={{ 
-            display: 'grid', 
-            gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
-            width: 'min(90vw, 400px)',
-            height: 'min(90vw, 400px)',
-          }}
-        >
-          {Array.from({ length: GRID_SIZE * GRID_SIZE }).map((_, i) => {
-            const x = i % GRID_SIZE;
-            const y = Math.floor(i / GRID_SIZE);
-            
-            const isSnakeHead = snake[0].x === x && snake[0].y === y;
-            const isSnakeBody = snake.some((s, index) => index !== 0 && s.x === x && s.y === y);
-            const isFood = food.x === x && food.y === y;
-
-            let cellClass = "w-full h-full border border-gray-900/10 ";
-            if (isSnakeHead) cellClass += "bg-green-400 rounded-sm z-10";
-            else if (isSnakeBody) cellClass += "bg-green-600 rounded-sm";
-            else if (isFood) cellClass += "bg-red-500 rounded-full scale-75 shadow-[0_0_10px_rgba(239,68,68,0.8)]";
-            else cellClass += "bg-gray-800/30";
-
-            return <div key={i} className={cellClass} />;
-          })}
-        </div>
-
-        {/* 覆盖层：菜单 */}
-        {gameState === 'MENU' && (
-          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-            <h2 className="text-3xl font-bold mb-6 text-green-400 tracking-wider">SNAKE</h2>
-            <button 
-              onClick={startGame}
-              className="flex items-center gap-2 px-8 py-3 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold rounded-full transition-all transform hover:scale-105 shadow-lg shadow-green-500/30"
-            >
-              <Play size={20} fill="currentColor" /> 开始游戏
-            </button>
-            <p className="mt-4 text-gray-400 text-sm">点击按钮开始</p>
-          </div>
-        )}
-
-        {/* 覆盖层：游戏结束 */}
-        {gameState === 'GAME_OVER' && (
-          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 backdrop-blur-sm">
-            <h2 className="text-3xl font-bold mb-2 text-red-500">GAME OVER</h2>
-            <p className="text-gray-300 mb-6">最终得分: {score}</p>
-            <button 
-              onClick={startGame}
-              className="flex items-center gap-2 px-8 py-3 bg-white text-black hover:bg-gray-200 font-bold rounded-full transition-all transform hover:scale-105"
-            >
-              <RotateCcw size={20} /> 再玩一次
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* 移动端控制器 */}
-      <div className="mt-8 grid grid-cols-3 gap-2 w-48 h-48 select-none touch-manipulation">
-        <div className="col-start-2">
-          <ControlButton 
-            onClick={() => handleDirectionChange({ x: 0, y: -1 })} 
-            icon={<ChevronUp size={32} />} 
-          />
-        </div>
-        <div className="col-start-1 row-start-2">
-          <ControlButton 
-            onClick={() => handleDirectionChange({ x: -1, y: 0 })} 
-            icon={<ChevronLeft size={32} />} 
-          />
-        </div>
-        <div className="col-start-2 row-start-2">
-          <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center">
-             <div className="w-4 h-4 bg-gray-700 rounded-full"></div>
-          </div>
-        </div>
-        <div className="col-start-3 row-start-2">
-          <ControlButton 
-            onClick={() => handleDirectionChange({ x: 1, y: 0 })} 
-            icon={<ChevronRight size={32} />} 
-          />
-        </div>
-        <div className="col-start-2 row-start-3">
-          <ControlButton 
-            onClick={() => handleDirectionChange({ x: 0, y: 1 })} 
-            icon={<ChevronDown size={32} />} 
-          />
-        </div>
-      </div>
-      
-      <p className="mt-4 text-xs text-gray-500">电脑端使用方向键，手机点击下方按钮</p>
+        <div class="text-3xl font-mono font-bold text-white" id="scoreVal">0</div>
     </div>
-  );
-}
 
-// 独立的控制按钮组件，提取出来方便复用样式
-function ControlButton({ onClick, icon }) {
-  return (
-    <button 
-      className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 hover:bg-gray-700 hover:text-white active:bg-green-600 active:text-white active:scale-95 transition-all shadow-lg border-b-4 border-gray-950 active:border-b-0 active:translate-y-1"
-      onPointerDown={(e) => {
-        // 使用 PointerDown 获得比 Click 更快的响应，并防止双击缩放
-        e.preventDefault();
-        onClick();
-      }}
-    >
-      {icon}
-    </button>
-  );
-}
+    <!-- 游戏区域容器 -->
+    <div class="relative group">
+        <!-- Canvas 画布 -->
+        <canvas id="gameCanvas" width="400" height="400" class="border-4 border-gray-700 block max-w-[90vw] max-h-[50vh]"></canvas>
+
+        <!-- 开始菜单覆盖层 -->
+        <div id="startScreen" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 rounded-lg backdrop-blur-sm">
+            <h2 class="text-4xl font-bold mb-6 text-green-500 tracking-wider" style="text-shadow: 0 0 10px rgba(34, 197, 94, 0.5);">SNAKE</h2>
+            <button id="startBtn" class="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-full transition-all shadow-[0_0_15px_rgba(34,197,94,0.4)] transform hover:scale-105 active:scale-95">
+                <!-- Play Icon -->
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 5V19L19 12L8 5Z"/></svg>
+                开始游戏
+            </button>
+            <p class="mt-4 text-gray-500 text-sm">点击按钮开始</p>
+        </div>
+
+        <!-- 游戏结束覆盖层 -->
+        <div id="gameOverScreen" class="absolute inset-0 bg-black/80 flex flex-col items-center justify-center z-20 rounded-lg backdrop-blur-sm hidden">
+            <h2 class="text-3xl font-bold mb-2 text-red-500">GAME OVER</h2>
+            <p class="text-gray-300 mb-6 text-lg">最终得分: <span id="finalScore">0</span></p>
+            <button id="restartBtn" class="flex items-center gap-2 px-8 py-3 bg-white text-black hover:bg-gray-200 font-bold rounded-full transition-all transform hover:scale-105 active:scale-95">
+                <!-- Restart Icon -->
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                再玩一次
+            </button>
+        </div>
+    </div>
+
+    <!-- 虚拟控制器 (手机端专用) -->
+    <div class="mt-6 grid grid-cols-3 gap-3 w-[200px] h-[200px] select-none touch-manipulation">
+        <!-- 上 -->
+        <div class="col-start-2">
+            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="up">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            </button>
+        </div>
+        <!-- 左 -->
+        <div class="col-start-1 row-start-2">
+            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="left">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+        </div>
+        <!-- 中心装饰 -->
+        <div class="col-start-2 row-start-2 flex items-center justify-center">
+            <div class="w-4 h-4 bg-gray-700 rounded-full opacity-50"></div>
+        </div>
+        <!-- 右 -->
+        <div class="col-start-3 row-start-2">
+            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="right">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+        </div>
+        <!-- 下 -->
+        <div class="col-start-2 row-start-3">
+            <button class="d-pad w-full h-full bg-gray-800 rounded-2xl flex items-center justify-center text-gray-400 shadow-lg border-b-4 border-gray-950 btn-press" data-dir="down">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+        </div>
+    </div>
+    
+    <p class="mt-4 text-[10px] text-gray-600">PC端请使用键盘方向键 • 移动端请点击下方按钮</p>
+
+    <script>
+        // --- 游戏配置 ---
+        const CANVAS_SIZE = 400;
+        const GRID_COUNT = 20;
+        const CELL_SIZE = CANVAS_SIZE / GRID_COUNT;
+        
+        // --- DOM 元素 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('scoreVal');
+        const highScoreEl = document.getElementById('highScoreVal');
+        const finalScoreEl = document.getElementById('finalScore');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const dPadButtons = document.querySelectorAll('.d-pad');
+
+        // --- 游戏状态变量 ---
+        let gameLoopId = null;
+        let snake = [];
+        let food = {};
+        let direction = {};
+        let nextDirection = {}; // 缓冲输入，防止一帧内连续掉头
+        let score = 0;
+        let speed = 150;
+        let isGameRunning = false;
+        
+        // 读取最高分
+        let highScore = parseInt(localStorage.getItem('snakeHighScore') || '0');
+        highScoreEl.textContent = highScore;
+
+        // --- 初始化函数 ---
+        function initGame() {
+            snake = [
+                {x: 10, y: 10},
+                {x: 10, y: 11},
+                {x: 10, y: 12}
+            ];
+            direction = {x: 0, y: -1}; // 向上
+            nextDirection = {x: 0, y: -1};
+            score = 0;
+            speed = 150;
+            scoreEl.textContent = score;
+            placeFood();
+            isGameRunning = true;
+            
+            // UI 切换
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            
+            // 启动循环
+            if (gameLoopId) clearInterval(gameLoopId);
+            gameLoopId = setInterval(gameLoop, speed);
+        }
+
+        // --- 生成食物 ---
+        function placeFood() {
+            let valid = false;
+            while (!valid) {
+                food = {
+                    x: Math.floor(Math.random() * GRID_COUNT),
+                    y: Math.floor(Math.random() * GRID_COUNT)
+                };
+                // 检查是否生成在蛇身上
+                valid = !snake.some(segment => segment.x === food.x && segment.y === food.y);
+            }
+        }
+
+        // --- 游戏主循环 ---
+        function gameLoop() {
+            update();
+            draw();
+        }
+
+        // --- 逻辑更新 ---
+        function update() {
+            // 更新方向
+            direction = nextDirection;
+
+            const head = {x: snake[0].x + direction.x, y: snake[0].y + direction.y};
+
+            // 1. 撞墙检测
+            if (head.x < 0 || head.x >= GRID_COUNT || head.y < 0 || head.y >= GRID_COUNT) {
+                gameOver();
+                return;
+            }
+
+            // 2. 撞自己检测
+            if (snake.some(segment => segment.x === head.x && segment.y === head.y)) {
+                gameOver();
+                return;
+            }
+
+            // 移动蛇头
+            snake.unshift(head);
+
+            // 3. 吃食物
+            if (head.x === food.x && head.y === food.y) {
+                score += 10;
+                scoreEl.textContent = score;
+                placeFood();
+                
+                // 加速
+                if (speed > 60) {
+                    speed -= 2;
+                    clearInterval(gameLoopId);
+                    gameLoopId = setInterval(gameLoop, speed);
+                }
+            } else {
+                // 没吃到，移除蛇尾
+                snake.pop();
+            }
+        }
+
+        // --- 渲染绘图 ---
+        function draw() {
+            // 清空画布
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+            // 画食物
+            ctx.fillStyle = '#ef4444'; // Red-500
+            ctx.beginPath();
+            ctx.arc(
+                food.x * CELL_SIZE + CELL_SIZE / 2, 
+                food.y * CELL_SIZE + CELL_SIZE / 2, 
+                CELL_SIZE / 2 - 2, 
+                0, 
+                Math.PI * 2
+            );
+            ctx.fill();
+            // 食物发光效果
+            ctx.shadowColor = '#ef4444';
+            ctx.shadowBlur = 10;
+            ctx.fill();
+            ctx.shadowBlur = 0; // 重置阴影
+
+            // 画蛇
+            snake.forEach((segment, index) => {
+                // 蛇头颜色不同
+                if (index === 0) {
+                    ctx.fillStyle = '#4ade80'; // Green-400
+                } else {
+                    ctx.fillStyle = '#16a34a'; // Green-600
+                }
+                
+                // 稍微留一点缝隙，让蛇有一节节的感觉
+                const pad = 1; 
+                ctx.fillRect(
+                    segment.x * CELL_SIZE + pad, 
+                    segment.y * CELL_SIZE + pad, 
+                    CELL_SIZE - pad * 2, 
+                    CELL_SIZE - pad * 2
+                );
+            });
+        }
+
+        // --- 游戏结束 ---
+        function gameOver() {
+            isGameRunning = false;
+            clearInterval(gameLoopId);
+            
+            // 更新最高分
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('snakeHighScore', highScore);
+                highScoreEl.textContent = highScore;
+            }
+            
+            finalScoreEl.textContent = score;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        // --- 输入处理 ---
+        function handleInput(newDir) {
+            if (!isGameRunning) return;
+            
+            // 防止掉头 (比如正在向右走，不能直接按左)
+            // 这里对比的是 direction (当前正在移动的方向) 而不是 nextDirection
+            if (direction.x + newDir.x === 0 && direction.y + newDir.y === 0) {
+                return;
+            }
+            nextDirection = newDir;
+        }
+
+        // 键盘监听
+        document.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowUp': handleInput({x: 0, y: -1}); break;
+                case 'ArrowDown': handleInput({x: 0, y: 1}); break;
+                case 'ArrowLeft': handleInput({x: -1, y: 0}); break;
+                case 'ArrowRight': handleInput({x: 1, y: 0}); break;
+            }
+        });
+
+        // 按钮点击监听 (兼容 触摸 和 鼠标)
+        dPadButtons.forEach(btn => {
+            // 使用 pointerdown 替代 click 以获得更快的响应，并防止双击缩放
+            btn.addEventListener('pointerdown', (e) => {
+                e.preventDefault(); // 阻止默认行为（如选中文字）
+                
+                // 添加按压效果类
+                btn.classList.add('active');
+                
+                const dir = btn.dataset.dir;
+                if (dir === 'up') handleInput({x: 0, y: -1});
+                if (dir === 'down') handleInput({x: 0, y: 1});
+                if (dir === 'left') handleInput({x: -1, y: 0});
+                if (dir === 'right') handleInput({x: 1, y: 0});
+            });
+
+            // 松开时移除按压效果
+            btn.addEventListener('pointerup', () => btn.classList.remove('active'));
+            btn.addEventListener('pointerleave', () => btn.classList.remove('active'));
+        });
+
+        // 按钮绑定
+        startBtn.addEventListener('click', initGame);
+        restartBtn.addEventListener('click', initGame);
+        // 手机上 touchstart 响应更快
+        startBtn.addEventListener('touchstart', (e) => { e.preventDefault(); initGame(); });
+        restartBtn.addEventListener('touchstart', (e) => { e.preventDefault(); initGame(); });
+
+    </script>
+</body>
+</html>
